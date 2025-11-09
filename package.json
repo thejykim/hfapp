@@ -20,7 +20,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
     "sst": "^3.9.28",
-    "sst-win32-x64": "^3.17.23",
     "typescript": "^5"
   }
 }
