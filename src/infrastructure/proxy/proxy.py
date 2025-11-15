@@ -13,8 +13,6 @@ from urllib.parse import urlparse
 # Configuration
 PORT = int(os.getenv("PORT", "8080"))
 HF_API_BASE = "https://hackforums.net/api/v2"
-HF_CLIENT_ID = os.getenv("HF_CLIENT_ID")
-HF_CLIENT_SECRET = os.getenv("HF_CLIENT_SECRET")
 PROXY_API_KEY = os.getenv("PROXY_API_KEY")
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -44,11 +42,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
         url = f"{HF_API_BASE}{self.path}"
         self.log_message(f"Proxying {method} {url}")
 
-        # Prepare headers for HF API
-        headers = {
-            "Authorization": f"Bearer {HF_CLIENT_ID}",
-            "Content-Type": "application/json",
-        }
+        # Build headers - forward from client
+        headers = {}
+
+        # Forward Content-Type header if present, default to application/json
+        content_type = self.headers.get("Content-Type")
+        if content_type:
+            headers["Content-Type"] = content_type
+        else:
+            headers["Content-Type"] = "application/json"
+
+        # Forward Authorization header if present
+        auth_header = self.headers.get("Authorization")
+        if auth_header:
+            headers["Authorization"] = auth_header
 
         # Get request body if present
         content_length = int(self.headers.get("Content-Length", 0))
@@ -93,17 +100,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
 def main():
     """Start the proxy server"""
     # Validate environment variables
-    if not all([HF_CLIENT_ID, HF_CLIENT_SECRET, PROXY_API_KEY]):
-        print("ERROR: Missing required environment variables")
-        print(f"HF_CLIENT_ID: {'set' if HF_CLIENT_ID else 'missing'}")
-        print(f"HF_CLIENT_SECRET: {'set' if HF_CLIENT_SECRET else 'missing'}")
-        print(f"PROXY_API_KEY: {'set' if PROXY_API_KEY else 'missing'}")
+    if not PROXY_API_KEY:
+        print("ERROR: Missing required environment variable PROXY_API_KEY")
         sys.exit(1)
 
     # Start server
     server = HTTPServer(("0.0.0.0", PORT), ProxyHandler)
     print(f"Starting HackForums API proxy on port {PORT}")
-    print(f"HF Client ID: {HF_CLIENT_ID[:20]}...")
     print(f"Proxy API Key: {PROXY_API_KEY[:8]}...")
 
     try:

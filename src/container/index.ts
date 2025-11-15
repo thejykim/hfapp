@@ -1,3 +1,6 @@
+import { ISessionStore } from "../core/interfaces/gateways/session-store.gateway";
+import { IronSessionStore } from "../infrastructure/gateways/iron-session-store.gateway";
+
 /**
  * Dependency Injection Container
  *
@@ -5,39 +8,44 @@
  * Services are created as singletons on first access.
  */
 class Container {
-  private instances = new Map<string, unknown>();
+	private instances = new Map<string, unknown>();
 
-  /**
-   * Get or create a singleton instance
-   */
-  private getSingleton<T>(key: string, factory: () => T): T {
-    if (!this.instances.has(key)) {
-      this.instances.set(key, factory());
-    }
-    return this.instances.get(key) as T;
-  }
+	/**
+	 * Get or create a singleton instance
+	 */
+	private getSingleton<T>(key: string, factory: () => T): T {
+		if (!this.instances.has(key)) {
+			this.instances.set(key, factory());
+		}
+		return this.instances.get(key) as T;
+	}
 
-  // Infrastructure dependencies will be registered here
-  // Example:
-  // get database() {
-  //   return this.getSingleton('database', () => new Database());
-  // }
-  //
-  // get userRepository() {
-  //   return this.getSingleton('userRepository', () => new UserRepository(this.database));
-  // }
+	// ============================================
+	// Infrastructure - Gateways
+	// ============================================
 
-  // Use cases will be registered here
-  // Example:
-  // get createUserUseCase() {
-  //   return new CreateUserUseCase(this.userRepository, this.emailService);
-  // }
+	/**
+	 * Session store for managing user authentication sessions
+	 */
+	get sessionStore(): ISessionStore {
+		return this.getSingleton("sessionStore", () => new IronSessionStore());
+	}
 
-  // Controllers will be registered here
-  // Example:
-  // get userController() {
-  //   return new UserController(this.createUserUseCase, this.getUserByIdUseCase);
-  // }
+	// ============================================
+	// Use Cases
+	// ============================================
+	// Example:
+	// get createUserUseCase() {
+	//   return new CreateUserUseCase(this.userRepository, this.emailService);
+	// }
+
+	// ============================================
+	// Controllers
+	// ============================================
+	// Example:
+	// get userController() {
+	//   return new UserController(this.createUserUseCase, this.getUserByIdUseCase);
+	// }
 }
 
 // Export singleton container instance

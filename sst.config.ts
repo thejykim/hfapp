@@ -19,6 +19,7 @@ export default $config({
     const hfClientId = new sst.Secret("HF_CLIENT_ID");
     const hfClientSecret = new sst.Secret("HF_CLIENT_SECRET");
     const proxyApiKey = new sst.Secret("PROXY_API_KEY");
+    const sessionSecret = new sst.Secret("SESSION_SECRET");
 
     // ========================================
     // EC2 Proxy Infrastructure
@@ -31,6 +32,37 @@ export default $config({
     const defaultVpc = await aws.ec2.getVpc({ default: true });
     const defaultSubnets = await aws.ec2.getSubnets({
       filters: [{ name: "vpc-id", values: [defaultVpc.id] }],
+    });
+
+    // IAM role for EC2 instance (CloudWatch Logs access)
+    const ec2Role = new aws.iam.Role("HfProxyRole", {
+      assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: {
+            Service: "ec2.amazonaws.com"
+          }
+        }]
+      })
+    });
+
+    // Attach CloudWatch Logs policy
+    new aws.iam.RolePolicyAttachment("HfProxyCloudWatchPolicy", {
+      role: ec2Role.name,
+      policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+    });
+
+    // Create instance profile
+    const instanceProfile = new aws.iam.InstanceProfile("HfProxyInstanceProfile", {
+      role: ec2Role.name
+    });
+
+    // CloudWatch Log Group for proxy logs
+    const proxyLogGroup = new aws.cloudwatch.LogGroup("HfProxyLogGroup", {
+      name: "/aws/ec2/hf-proxy",
+      retentionInDays: 7, // Keep logs for 7 days to manage costs
     });
 
     // Security group - allow proxy port and SSH
@@ -87,6 +119,7 @@ export default $config({
       vpcSecurityGroupIds: [securityGroup.id],
       subnetId: defaultSubnets.ids[0],
       associatePublicIpAddress: true,
+      iamInstanceProfile: instanceProfile.name,
       userData: $interpolate`#!/bin/bash
 set -e
 
@@ -100,6 +133,59 @@ yum install -y python3 python3-pip
 
 # Install Python dependencies
 pip3 install requests
+
+# Install and configure CloudWatch agent
+yum install -y amazon-cloudwatch-agent
+
+# Create CloudWatch agent config for journald logs
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'CLOUDWATCH_CONFIG_EOF'
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/cloud-init-output.log",
+            "log_group_name": "/aws/ec2/hf-proxy",
+            "log_stream_name": "{instance_id}/cloud-init",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    },
+    "log_stream_name": "{instance_id}/default",
+    "force_flush_interval": 15
+  }
+}
+CLOUDWATCH_CONFIG_EOF
+
+# Also configure to collect journald logs via additional config
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/journal.json << 'JOURNAL_CONFIG_EOF'
+{
+  "logs": {
+    "metrics_collected": {
+      "cpu": {
+        "measurement": []
+      }
+    }
+  }
+}
+JOURNAL_CONFIG_EOF
+
+# Enable journald collection directly via systemd
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/cloudwatch.conf << 'JOURNALD_CONF_EOF'
+[Journal]
+Storage=persistent
+ForwardToSyslog=yes
+JOURNALD_CONF_EOF
+
+# Start CloudWatch agent
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config \
+  -m ec2 \
+  -s \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
 
 # Create proxy directory
 mkdir -p /opt/hf-proxy
@@ -121,8 +207,6 @@ After=network.target
 Type=simple
 User=ec2-user
 WorkingDirectory=/opt/hf-proxy
-Environment="HF_CLIENT_ID=${hfClientId.value}"
-Environment="HF_CLIENT_SECRET=${hfClientSecret.value}"
 Environment="PROXY_API_KEY=${proxyApiKey.value}"
 Environment="PORT=8080"
 ExecStart=/usr/bin/python3 /opt/hf-proxy/proxy.py
@@ -156,10 +240,19 @@ echo "Setup complete at $(date)" > /var/log/hf-proxy-setup.log
     });
 
     // ========================================
+    // DNS - Route53 Hosted Zone
+    // ========================================
+    const zone = new aws.route53.Zone("HackforumsZone", {
+      name: "hackforums.app",
+      comment: "Managed by SST",
+    });
+
+    // ========================================
     // Next.js Application
     // ========================================
     const nextApp = new sst.aws.Nextjs("hfapp", {
-      link: [proxyApiKey],
+      domain: "hackforums.app",
+      link: [hfClientId, hfClientSecret, proxyApiKey, sessionSecret],
       environment: {
         PROXY_URL: $interpolate`http://${elasticIp.publicIp}:8080`,
       },
@@ -172,7 +265,8 @@ echo "Setup complete at $(date)" > /var/log/hf-proxy-setup.log
       elasticIp: elasticIp.publicIp,
       proxyUrl: $interpolate`http://${elasticIp.publicIp}:8080`,
       nextAppUrl: nextApp.url,
-      message: "Add the Elastic IP to your HackForums API whitelist",
+      nameservers: zone.nameServers,
+      message: "Add the Elastic IP to your HackForums API whitelist. Update Porkbun nameservers to the ones listed above.",
     };
   },
 });
