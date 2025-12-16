@@ -26,7 +26,7 @@ export default $config({
     // ========================================
 
     // Read proxy script
-    const proxyScript = readFileSync("src/infrastructure/proxy/proxy.py", "utf-8");
+    const proxyScript = readFileSync("src/lib/proxy/proxy.py", "utf-8");
 
     // Get default VPC to simplify setup (no NAT gateway costs)
     const defaultVpc = await aws.ec2.getVpc({ default: true });

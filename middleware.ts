@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resource } from "sst";
-import { container } from "./src/container";
+import { sessionStore } from "./src/lib/auth/session";
 import { encodeAuthState, buildHFAuthUrl } from "./src/lib/auth-utils";
 
 /**
@@ -16,7 +16,7 @@ export async function middleware(request: NextRequest) {
 	}
 
 	// Check for existing session
-	const session = await container.sessionStore.getSession();
+	const session = await sessionStore.getSession();
 
 	// If no session, redirect to HackForums OAuth
 	if (!session) {

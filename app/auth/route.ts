@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { container } from "@/src/container";
 import { decodeAuthState } from "@/src/lib/auth-utils";
-import { HFService } from "@/src/infrastructure/services/hf-service";
+import { HFService } from "@/src/lib/services/hf-service";
 
 /**
  * OAuth Callback Handler
@@ -31,7 +30,7 @@ export async function GET(request: NextRequest) {
 
 	try {
 		// Exchange authorization code for access token
-		const hfService = new HFService(container.sessionStore);
+		const hfService = new HFService();
 		await hfService.authorize(code);
 
 		// Decode state to get where user was trying to go
